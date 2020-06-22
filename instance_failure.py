@@ -86,6 +86,13 @@ def get_autoscaler_tasks(org_id, sddc_id, ip_address):
                     url = 'https://vmc.vmware.com/vmc/autoscaler/api/operator/tasks/{}'.format(cluster_task['task_id'])
                     r = api_request(url, headers=headers)
                     print(json.dumps(r.json(), indent=2, sort_keys=False))
+                    if r.json()['task_type'] == 'REMEDIATE-EBS-HOST':
+                        replace_ebs_task = None
+                        replace_ebs_task = r.json()['params']['replaceEbsHostTaskId']
+                        if replace_ebs_task:
+                            url = 'https://vmc.vmware.com/vmc/autoscaler/api/operator/tasks/{}'.format(replace_ebs_task)
+                            r = api_request(url, headers=headers)
+                            print(json.dumps(r.json(), indent=2, sort_keys=False))
 
 def get_rts_host_state(sddc_id, ip_address):
     token = get_api_token()
@@ -160,7 +167,11 @@ def get_instance_failure(sddc_id, org_id, region, ip_addr, inst_id, no_console_l
         if not instance_id:
             # Instance with matching IP was not found. Display autoscaler tasks and exit
             get_autoscaler_tasks(org_id, sddc_id, ip_addr)
-            return failure_data
+            print('')
+            #return failure_data 
+            if not inst_id:
+                pprint(failure_data)
+                sys.exit(1)
 
     if instance_id:
         if not no_console_logs:
@@ -183,6 +194,15 @@ def get_instance_failure(sddc_id, org_id, region, ip_addr, inst_id, no_console_l
 
     if not instance_id:
         instance_id = inst_id
+        # resp = ec2_client.describe_instances(Filters=[{'Name': 'instance-id', 'Values': [instance_id,]}])
+        resp = ec2_client.describe_instances(InstanceIds=[instance_id,])
+        if len(resp['Reservations']) > 0:
+            if not 'launch_time' in failure_data:
+                failure_data['launch_time'] = resp['Reservations'][0]['Instances'][0]['LaunchTime']
+            if not 'instance_type' in failure_data:
+                failure_data['instance_type'] = resp['Reservations'][0]['Instances'][0]['InstanceType']
+            if not 'instance_state' in failure_data:
+                failure_data['instance_state'] = resp['Reservations'][0]['Instances'][0]['State']
 
     if time_period > 24:
         period = 300
@@ -242,11 +262,11 @@ def print_data(data):
         data['last_instance_status_failure'] = str(data['last_instance_status_failure'])
     if data['last_system_status_failure']:
         data['last_system_status_failure'] = str(data['last_instance_status_failure'])
-    if data['launch_time']:
+    if 'launch_time' in data:
         data['launch_time'] = str(data['launch_time'])
-    if 'ImpairedSince' in data['instance_status'][0]:
+    if 'instance_status' in data and 'ImpairedSince' in data['instance_status'][0]:
         data['instance_status'][0]['ImpairedSince'] = str(data['instance_status'][0]['ImpairedSince'])
-    if 'ImpairedSince' in data['system_status'][0]:
+    if 'system_status' in data and 'ImpairedSince' in data['system_status'][0]:
         data['system_status'][0]['ImpairedSince'] = str(data['system_status'][0]['ImpairedSince'])
     pprint(data)
 

@@ -68,7 +68,8 @@ def get_sddc_org_region(sddc_id):
     if resp.status_code < 200 or resp.status_code > 202:
         print("Unable to obtain SDDC with ID " + sddc_id + ". Quitting...")
         return None, None
-    return resp.json()['org_id'], resp.json()['resource_config']['sddc_manifest']['esx_ami']['region']
+    return (resp.json()['org_id'], resp.json()['resource_config']['sddc_manifest']['esx_ami']['region'],
+        resp.json()['resource_config']['vpc_info']['id'])
 
 def get_autoscaler_tasks(org_id, sddc_id, ip_address):
     token = get_api_token()
@@ -121,7 +122,7 @@ def get_rts_host_state(sddc_id, ip_address):
     print("Timed out waiting for RTS task to complete")
     return None
 
-def get_instance_failure(sddc_id, org_id, region, ip_addr, inst_id, no_console_logs=True, time_period=3):
+def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_console_logs=True, time_period=3):
     instance_id = None
     hardware_failure = False
     instance_status_failure = False
@@ -156,7 +157,7 @@ def get_instance_failure(sddc_id, org_id, region, ip_addr, inst_id, no_console_l
     
     if ip_addr:
         failure_data['ip_address'] = ip_addr
-        filters = [{'Name': 'private-ip-address', 'Values': [ip_addr]}]
+        filters = [{'Name': 'private-ip-address', 'Values': [ip_addr]}, {'Name': 'vpc-id', 'Values': [vpc_id]}]
         r = ec2_resource.instances.filter(Filters=filters)
         for item in r:
             instance_id = item.instance_id
@@ -185,24 +186,34 @@ def get_instance_failure(sddc_id, org_id, region, ip_addr, inst_id, no_console_l
                 f.write(value.encode('utf-8'))
             print("Saving console output to file: " + filename)
 
-        resp = ec2_client.describe_instance_status(InstanceIds=[instance_id,])
-        # print(resp)
-        failure_data['instance_status'] = resp['InstanceStatuses'][0]['InstanceStatus']['Details']
-        failure_data['system_status'] = resp['InstanceStatuses'][0]['SystemStatus']['Details']
-        if 'Events' in resp['InstanceStatuses']:
-            failure_data['scheduled_events'] = resp['InstanceStatuses'][0]['Events']
-
     if not instance_id:
         instance_id = inst_id
         # resp = ec2_client.describe_instances(Filters=[{'Name': 'instance-id', 'Values': [instance_id,]}])
-        resp = ec2_client.describe_instances(InstanceIds=[instance_id,])
-        if len(resp['Reservations']) > 0:
-            if not 'launch_time' in failure_data:
-                failure_data['launch_time'] = resp['Reservations'][0]['Instances'][0]['LaunchTime']
-            if not 'instance_type' in failure_data:
-                failure_data['instance_type'] = resp['Reservations'][0]['Instances'][0]['InstanceType']
-            if not 'instance_state' in failure_data:
-                failure_data['instance_state'] = resp['Reservations'][0]['Instances'][0]['State']
+        try:
+            resp = ec2_client.describe_instances(InstanceIds=[instance_id,])
+            if len(resp['Reservations']) > 0:
+                if not 'launch_time' in failure_data:
+                    failure_data['launch_time'] = resp['Reservations'][0]['Instances'][0]['LaunchTime']
+                if not 'instance_type' in failure_data:
+                    failure_data['instance_type'] = resp['Reservations'][0]['Instances'][0]['InstanceType']
+                if not 'instance_state' in failure_data:
+                    failure_data['instance_state'] = resp['Reservations'][0]['Instances'][0]['State']
+        except ClientError as e:
+            print(e.message)
+            pass
+
+    if instance_id:
+        try:
+            resp = ec2_client.describe_instance_status(InstanceIds=[instance_id,])
+            # print(resp)
+            if len(resp['InstanceStatuses']) > 0:
+                failure_data['instance_status'] = resp['InstanceStatuses'][0]['InstanceStatus']['Details']
+                failure_data['system_status'] = resp['InstanceStatuses'][0]['SystemStatus']['Details']
+                if 'Events' in resp['InstanceStatuses'][0]:
+                    failure_data['scheduled_events'] = resp['InstanceStatuses'][0]['Events']
+        except ClientError as e:
+            print(e.message)
+            pass
 
     if time_period > 24:
         period = 300
@@ -277,7 +288,7 @@ if __name__ == '__main__':
     if not args.ip_address and not args.instance_id:
         print("Must specific either an instance IP or ID. Quitting...")
         sys.exit(1)
-    org_id, region = get_sddc_org_region(args.sddc_id)
+    org_id, region, vpc_id = get_sddc_org_region(args.sddc_id)
     if not org_id:
         sys.exit(1)
 
@@ -285,7 +296,7 @@ if __name__ == '__main__':
         get_autoscaler_tasks(org_id, args.sddc_id, args.ip_address)
         sys.exit(0)
 
-    ret = get_instance_failure(args.sddc_id, org_id, region,
+    ret = get_instance_failure(args.sddc_id, org_id, region, vpc_id,
                                args.ip_address, args.instance_id,
                                args.no_console_output, args.time_period)
     if args.host_state:

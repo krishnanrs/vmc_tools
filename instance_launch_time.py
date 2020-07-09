@@ -85,7 +85,11 @@ def get_instance_data(sddc_id, org_id, region, vpc_id, ip_addr, inst_id):
         filters.append({'Name': 'instance-id', 'Values': [inst_id,]})
 
     r = ec2_resource.instances.filter(Filters=filters)
+    header = True
     for item in r:
+        if header:
+            print('InstanceId', 'InstanceType', 'IPAddress', 'InstanceState', 'LaunchTime')
+            header = False
         print(item.instance_id, item.instance_type, item.private_ip_address, item.state['Name'], str(item.launch_time))
 
 

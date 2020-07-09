@@ -27,6 +27,7 @@ $ ./instance_boot_time.py -S bd2ce819-d7dc-4860-8179-a9e4fb27b83e
 (u'esx-1', u'i-0137d7b2b6af485fc', 51)
 (u'esx-2', u'i-06ec68d4ae7e943ac', 51)
 ```
+
 **Note**: This script requires intranet (VPN) access as RTS service is only available on the intranet
 
 ## instance_failure
@@ -57,6 +58,9 @@ This script does the following:
                         Time range in hours to search for AWS cloudwatch metrics
   -h, --help
 ```
+
+**Note**: The option to query the host state using RTS requires intranet (VPN) access as RTS service is only available on the intranet
+
 **Example**:
 ```
 $ ./instance_failure.py -S 229a57ae-412e-4314-8171-ca443ac6f4b9 -I 172.21.242.137

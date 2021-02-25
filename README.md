@@ -141,6 +141,7 @@ optional arguments:
   -h, --help
 ```
 **Example**:
+```
 $ ./get_sddc_tasks.py -S 297860eb-f557-45cb-b156-1cf682bf6ff2 -t CLUSTER-DESTROY
   .
 <snip>

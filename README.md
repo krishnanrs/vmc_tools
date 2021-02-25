@@ -119,3 +119,78 @@ $ ./instance_launch_time.py -S bd2ce819-d7dc-4860-8179-a9e4fb27b83e
 ('i-036ed67830b722029', 'm5.xlarge', '10.5.144.4', 'running', '2020-05-18 05:03:05+00:00')
 ```
 
+## get_sddc_task
+
+This script queries the VMC tasks that were executed for a particular SDDC and reports the output in JSON format.
+```
+usage: get_sddc_tasks.py -S SDDC_ID [-t TASK_TYPE] [-s TASK_STATUS]
+                         [-i TASK_ID] [-p {1,3,7,15,30,60,180}] [-h]
+
+
+optional arguments:
+  -S SDDC_ID, --sddc-id SDDC_ID
+                        SDDC ID of the affected instance
+  -t TASK_TYPE, --task-type TASK_TYPE
+                        VMC Task Type
+  -s TASK_STATUS, --task-status TASK_STATUS
+                        VMC Task Status
+  -i TASK_ID, --task-id TASK_ID
+                        Get specific VMC taskID and exit
+  -p {1,3,7,15,30,60,180}, --time-period {1,3,7,15,30,60,180}
+                        Time range in days to retrieve SDDC tasks
+  -h, --help
+```
+**Example**:
+$ ./get_sddc_tasks.py -S 297860eb-f557-45cb-b156-1cf682bf6ff2 -t CLUSTER-DESTROY
+  .
+<snip>
+  .
+    "id": "04f0fa40-45b9-483a-8846-fef4fca27172", 
+    "parent_notifications": null, 
+    "service_errors": [], 
+    "customer_error_message": null, 
+    "task_type": "CLUSTER-DESTROY", 
+    "user_id": "09411a8e-5dad-39ee-ae97-234a2ca02f7d", 
+    "resource_id": "297860eb-f557-45cb-b156-1cf682bf6ff2", 
+    "estimated_remaining_minutes": 0, 
+    "start_resource_entity_version": 1103, 
+    "end_resource_entity_version": 1106, 
+    "version": 51, 
+    "params": {
+      "clusterForceRemove": true, 
+      "clusterName": "Cluster-2", 
+      "clusterOriginalState": "FAILED", 
+      "clusterId": "16c4f1b4-9c9e-450d-b420-0261bdbda8b9", 
+      "sddcWorkerTaskId": "aa719b42-e638-4115-ae33-ca13e290859c", 
+      "clusterDeletePollCount": 44, 
+      "sddcIdOfCluster": "297860eb-f557-45cb-b156-1cf682bf6ff2"
+    }, 
+  .
+<snip>
+    "end_time": "2021-02-22T17:07:45.668000Z", 
+    "created_build_number": 0, 
+    "resource_type": "sddc", 
+    "task_sub_status_transitions": [
+      {
+        "new_sub_status": "POD_DELETE_CLUSTER", 
+        "transition_time": "2021-02-22T16:56:23.783Z", 
+        "old_sub_status": "STARTED"
+      }, 
+      {
+        "new_sub_status": "POD_POLL_DELETE_CLUSTER", 
+        "transition_time": "2021-02-22T16:56:23.893Z", 
+        "old_sub_status": "POD_DELETE_CLUSTER"
+      }, 
+      {
+        "new_sub_status": "DELETE_INSTANCES", 
+        "transition_time": "2021-02-22T17:00:50.442Z", 
+        "old_sub_status": "POD_POLL_DELETE_CLUSTER"
+      }, 
+      {
+        "new_sub_status": "FINISHED", 
+        "transition_time": "2021-02-22T17:07:45.639Z", 
+        "old_sub_status": "DELETE_INSTANCES"
+      }
+    ]
+  }
+```

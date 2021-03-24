@@ -104,7 +104,7 @@ def get_rts_host_state(sddc_id, ip_address):
     headers = DEFAULT_HEADERS
     headers.update({'csp-auth-token': token})
     url = 'https://internal.vmc.vmware.com/vmc/rts/api/operator/script'
-    rts_script_data = "scriptId:vcenter_host_manage,sddc-id:{},esx:{},action:state,reason:test".format(sddc_id, ip_address)
+    rts_script_data = "scriptId:vcenter.get_host_state,sddc-id:{},esx:{},reason:test".format(sddc_id, ip_address)
     data = {"requestBody": rts_script_data}
     resp = api_request(url, method='post', headers=headers, data=json.dumps(data))
     if resp.status_code < 200 or resp.status_code > 202:
@@ -119,8 +119,9 @@ def get_rts_host_state(sddc_id, ip_address):
             return None
         if resp.json()['status'] == 'FINISHED':
             output = json.loads(resp.json()['params']['SCRIPTDATA']['data'])
-            #print(output['output'])
-            print(json.dumps(output['output'], indent=2, sort_keys=False))
+            # print(output['result'])
+            for host in output['result']['output']['esx']:
+                print(json.dumps(host, indent=2, sort_keys=False))
             #print(resp.json()['params']['SCRIPTDATA']['data'])
             return 0
     print("Timed out waiting for RTS task to complete")
@@ -139,7 +140,17 @@ def get_rts_log_bundle(sddc_id, ip_address, ref_id):
         print("Unable to trigger log bundle collection for host " + ip_address + "in SDDC " + sddc_id)
         return None
     else:
-        print("Successfully triggered log bundle collection for host " + ip_address + "in SDDC " + sddc_id)
+        print("Successfully triggered log bundle collection for host " + ip_address + " in SDDC " + sddc_id)
+        url = 'https://internal.vmc.vmware.com/vmc/rts/api/operator/tasks/{}'.format(resp.json()['id'])
+        for i in range(0, 2):
+            time.sleep(20)
+            resp = api_request(url, headers=headers)
+            if resp.status_code < 200 or resp.status_code > 202:
+                print("Unable to obtain RTS task details")
+                return None
+            if resp.json()['status'] == 'FAILED':
+                print("Log bundle collection failed. Please check the host name or retry after some time")
+                break
         return 0
 
 def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_console_logs=True, time_period=3, cloud_trail=False):

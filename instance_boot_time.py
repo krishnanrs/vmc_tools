@@ -55,11 +55,14 @@ def get_rts_host_state(sddc_id, ip_address, host_name):
     headers.update({'csp-auth-token': token})
     url = 'https://internal.vmc.vmware.com/vmc/rts/api/operator/script'
     if ip_address:
-        rts_script_data = "scriptId:vcenter_host_manage,sddc-id:{},esx:{},action:state,reason:test".format(sddc_id, ip_address)
+        # rts_script_data = "scriptId:vcenter_host_manage,sddc-id:{},esx:{},action:state,reason:test".format(sddc_id, ip_address)
+        rts_script_data = "scriptId:vcenter.get_host_state,sddc-id:{},esx:{},reason:test".format(sddc_id, ip_address)
     elif host_name:
-        rts_script_data = "scriptId:vcenter_host_manage,sddc-id:{},esx:{},action:state,reason:test".format(sddc_id, host_name)
+        # rts_script_data = "scriptId:vcenter_host_manage,sddc-id:{},esx:{},action:state,reason:test".format(sddc_id, host_name)
+        rts_script_data = "scriptId:vcenter.get_host_state,sddc-id:{},esx:{},reason:test".format(sddc_id, host_name)
     else:
-        rts_script_data = "scriptId:vcenter_host_manage,sddc-id:{},action:state,reason:test".format(sddc_id)
+        # rts_script_data = "scriptId:vcenter_host_manage,sddc-id:{},action:state,reason:test".format(sddc_id)
+        rts_script_data = "scriptId:vcenter.get_host_state,sddc-id:{},filter_by_state:all,reason:test".format(sddc_id)
     data = {"requestBody": rts_script_data}
     resp = api_request(url, method='post', headers=headers, data=json.dumps(data))
     if resp.status_code < 200 or resp.status_code > 202:
@@ -73,16 +76,19 @@ def get_rts_host_state(sddc_id, ip_address, host_name):
             print("Unable to obtain RTS task details")
             return None
         if resp.json()['status'] == 'FINISHED':
-            output = json.loads(resp.json()['params']['SCRIPTDATA']['data'])
-            if len(output['output']['hosts']) > 0:
-                print('Host', 'instanceId', 'uptime (Days)')
-            for host in output['output']['hosts']:
-                boottime = datetime.strptime(host['bootTime'], '%Y-%m-%d %H:%M:%S.%f+00:00')
-                now = datetime.utcnow()
-                uptime = abs(now - boottime)
+             output = json.loads(resp.json()['params']['SCRIPTDATA']['data'])
+             # if len(output['output']['hosts']) > 0:
+             if len(output['result']['output']['esx']) > 0:
+                 print('Host', 'instanceId', 'connectionState', 'uptime (Days)')
+             # for host in output['output']['hosts']:
+             for host in output['result']['output']['esx']:
+                 boottime = datetime.strptime(host['bootTime'], '%Y-%m-%d %H:%M:%S.%f+00:00')
+                 conn = host['connectionState']
+                 now = datetime.utcnow()
+                 uptime = abs(now - boottime)
                 # print(host['esx'], host['instance_id'], host['bootTime'])
-                print(host['esx'], host['instance_id'], uptime.days)
-            return 0
+                 print(host['name'], host['instance_id'], conn, uptime.days)
+             return 0
     print("Timed out waiting for RTS task to complete")
     return None
 

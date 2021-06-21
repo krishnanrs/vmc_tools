@@ -71,13 +71,14 @@ def get_sddc_org_region(sddc_id):
     if resp.status_code < 200 or resp.status_code > 202:
         print("Unable to obtain SDDC with ID " + sddc_id + ". Quitting...")
         return None, None
-    return (resp.json()['org_id'], resp.json()['resource_config']['sddc_manifest']['esx_ami']['region'],
+    # return (resp.json()['org_id'], resp.json()['resource_config']['sddc_manifest']['esx_ami']['region'],
+    return (resp.json()['org_id'], resp.json()['resource_config']['sddc_manifest']['esx_nsxt_ami']['region'],
         resp.json()['resource_config']['vpc_info']['id'])
 
 def get_autoscaler_tasks(org_id, sddc_id, ip_address):
     token = get_api_token()
-    #url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks'.format(org_id, sddc_id)
-    url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2020-06-20'.format(org_id, sddc_id)
+    url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks'.format(org_id, sddc_id)
+    # url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2020-06-20'.format(org_id, sddc_id)
     headers = DEFAULT_HEADERS
     headers.update({'csp-auth-token': token})
     resp = api_request(url, headers=headers)
@@ -131,9 +132,11 @@ def get_rts_log_bundle(sddc_id, ip_address, ref_id):
     token = get_api_token()
     headers = DEFAULT_HEADERS
     headers.update({'csp-auth-token': token})
-    url = 'https://internal.vmc.vmware.com/vmc/rts/api/user/logbundle/collect'
+    #url = 'https://internal.vmc.vmware.com/vmc/rts/api/user/logbundle/collect'
+    url = 'https://internal.vmc.vmware.com/vmc/rts/api/operator/script'
     now = datetime.now()
-    rts_script_data = "scriptId:esx_support_s3,sddc-id:{},timestamp:{},resource_type:host,host:{},referenceid:{},log_access_reason:No Access to Log Intelligence,reason:{}".format(sddc_id, now.strftime("%Y-%m-%d-%H:%M"), ip_address,ref_id, ref_id)
+    # rts_script_data = "scriptId:esx_support_s3,sddc-id:{},timestamp:{},resource_type:host,host:{},referenceid:{},log_access_reason:No Access to Log Intelligence,reason:{}".format(sddc_id, now.strftime("%Y-%m-%d-%H:%M"), ip_address,ref_id, ref_id)
+    rts_script_data = "scriptId:esx.collect_support_bundle,sddc-id:{},resource_type:host,host:{},performance:false,reason:{}".format(sddc_id, ip_address, ref_id)
     data = {"requestBody": rts_script_data}
     resp = api_request(url, method='post', headers=headers, data=json.dumps(data))
     if resp.status_code < 200 or resp.status_code > 202:

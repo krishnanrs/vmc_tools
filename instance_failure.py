@@ -1,9 +1,9 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python3
 
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 import argparse
 import json
@@ -15,6 +15,12 @@ from botocore.exceptions import ClientError
 PROD_AUTH_URL = "https://console.cloud.vmware.com/csp/gateway/am/api/auth/api-tokens/authorize"
 RECOMMENDATION = {'Recommendation': None, 'Details': None}
 DEFAULT_HEADERS = {'Accept': 'application/json', 'Content-type': 'Application/json'}
+LINT_API_URL = "https://api.mgmt.cloud.vmware.com"
+LINT_EU_API_URL = "https://de.api.mgmt.cloud.vmware.com"
+LINT_AU_API_URL = "https://au.api.mgmt.cloud.vmware.com"
+LINT_LOG_QUERY_LINK = "/ops/query/log-query-tasks"
+DISABLE_RECURSIVE = False
+ROWS = 100000
 
 class CommandFormatter(argparse.ArgumentDefaultsHelpFormatter,
                        argparse.RawDescriptionHelpFormatter):
@@ -35,6 +41,10 @@ parser.add_argument('-s', '--host-state', action='store_true',
                     help='Query the host state using RTS script')
 parser.add_argument('-c', '--cloud-trail', action='store_true',
                     help='Query the cloudtrail for host reboot events')
+parser.add_argument('-q', '--lint-query', action='store_true',
+                    help='Query the LINT logs for VM HA restart events')
+parser.add_argument('-r', '--nic-reset-query', action='store_true',
+                    help='Query the LINT logs for NIC reset events')
 parser.add_argument('-l', '--log-bundle', help='Reference ID for collecting host log bundle')
 parser.add_argument('-p', '--time-period', type=int, choices=[1,3,6,12,24,36,48,72], default=3,
                     help='Time range in hours to search for AWS cloudwatch metrics')
@@ -77,8 +87,9 @@ def get_sddc_org_region(sddc_id):
 
 def get_autoscaler_tasks(org_id, sddc_id, ip_address):
     token = get_api_token()
-    url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks'.format(org_id, sddc_id)
-    # url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2020-06-20'.format(org_id, sddc_id)
+    # url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks'.format(org_id, sddc_id)
+    url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2021-12-01'.format(org_id, sddc_id)
+    # url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2022-07-01'.format(org_id, sddc_id)
     headers = DEFAULT_HEADERS
     headers.update({'csp-auth-token': token})
     resp = api_request(url, headers=headers)
@@ -88,6 +99,11 @@ def get_autoscaler_tasks(org_id, sddc_id, ip_address):
     for sddc_task in resp.json()['sddc_task_status']:
         if 'cluster_task_status' in sddc_task:
             for cluster_task in sddc_task['cluster_task_status']:
+                #url = 'https://vmc.vmware.com/vmc/autoscaler/api/operator/tasks/{}'.format(cluster_task['task_id'])
+                #r = api_request(url, headers=headers)
+                #print(json.dumps(r.json(), indent=2, sort_keys=False))
+                #continue
+
                 if ip_address and cluster_task['hostname'] == ip_address:
                     url = 'https://vmc.vmware.com/vmc/autoscaler/api/operator/tasks/{}'.format(cluster_task['task_id'])
                     r = api_request(url, headers=headers)
@@ -99,6 +115,11 @@ def get_autoscaler_tasks(org_id, sddc_id, ip_address):
                             url = 'https://vmc.vmware.com/vmc/autoscaler/api/operator/tasks/{}'.format(replace_ebs_task)
                             r = api_request(url, headers=headers)
                             print(json.dumps(r.json(), indent=2, sort_keys=False))
+                # else:
+                #     for cluster_task in sddc_task['cluster_task_status']:
+                #         print(cluster_task)
+        # else:
+        #     print(resp.json())
 
 def get_rts_host_state(sddc_id, ip_address):
     token = get_api_token()
@@ -133,14 +154,16 @@ def get_rts_log_bundle(sddc_id, ip_address, ref_id):
     headers = DEFAULT_HEADERS
     headers.update({'csp-auth-token': token})
     #url = 'https://internal.vmc.vmware.com/vmc/rts/api/user/logbundle/collect'
-    url = 'https://internal.vmc.vmware.com/vmc/rts/api/operator/script'
+    # url = 'https://internal.vmc.vmware.com/vmc/rts/api/operator/script'
+    url = 'https://internal.vmc.vmware.com/vmc/rts/api/user/sddc/{}/logbundle/esx'.format(sddc_id)
     now = datetime.now()
     # rts_script_data = "scriptId:esx_support_s3,sddc-id:{},timestamp:{},resource_type:host,host:{},referenceid:{},log_access_reason:No Access to Log Intelligence,reason:{}".format(sddc_id, now.strftime("%Y-%m-%d-%H:%M"), ip_address,ref_id, ref_id)
-    rts_script_data = "scriptId:esx.collect_support_bundle,sddc-id:{},resource_type:host,host:{},performance:false,reason:{}".format(sddc_id, ip_address, ref_id)
-    data = {"requestBody": rts_script_data}
+    # rts_script_data = "scriptId:esx.collect_support_bundle,sddc-id:{},resource_type:host,host:{},performance:false,reason:{}".format(sddc_id, ip_address, ref_id)
+    # data = {"requestBody": rts_script_data}
+    data = {"resource_type": "host", "host": ip_address, "reason": ref_id, "performance": "false"}
     resp = api_request(url, method='post', headers=headers, data=json.dumps(data))
     if resp.status_code < 200 or resp.status_code > 202:
-        print("Unable to trigger log bundle collection for host " + ip_address + "in SDDC " + sddc_id)
+        print("Unable to trigger log bundle collection for host " + ip_address + " in SDDC " + sddc_id)
         return None
     else:
         print("Successfully triggered log bundle collection for host " + ip_address + " in SDDC " + sddc_id)
@@ -156,6 +179,85 @@ def get_rts_log_bundle(sddc_id, ip_address, ref_id):
                 break
         return 0
 
+def get_lint_log_query_results(url, headers, base_url):
+    result_list = list()
+    waiting = True
+    while waiting:
+        # print(url)
+        time.sleep(10)
+
+        resp = api_request(url, headers=headers)
+        if resp.json()['taskInfo']['stage'] == 'FAILED':
+            raise AssertionError(http_result_dict['failureMessage'])
+        elif resp.json()['taskInfo']['stage'] == 'FINISHED':
+            result_list = resp.json()['logQueryResults']
+            if resp.json().get('nextPageLink') and not DISABLE_RECURSIVE:
+                # result_list = result_list + get_lint_log_query_results(LINT_API_URL + resp.json()['nextPageLink'], headers)
+                result_list = result_list + get_lint_log_query_results(base_url + resp.json()['nextPageLink'], headers, base_url)
+            waiting = False
+
+
+    return result_list
+
+
+def lint_query(sddc_id, region, time_period=3, nic_reset=False):
+    if nic_reset:
+        LOG_QUERY = "SELECT log_timestamp, text FROM logs WHERE (text='vmnic0' AND text = 'reset' AND text != 'logical space' AND text != 'Function reset' AND sddc_id='{}') ORDER BY timestamp ASC".format(sddc_id)
+    else:
+        TEXT = "vsphere HA restarted virtual machine"
+        LOG_QUERY = "SELECT log_timestamp, text FROM logs WHERE (text='{}' AND sddc_id='{}') ORDER BY timestamp ASC".format(TEXT, sddc_id)
+    now = datetime.now()
+    END_TIME = round(now.timestamp() * 1000)
+    START_TIME = round((now - timedelta(hours=time_period)).timestamp() * 1000)
+    QUERY_DICT = {
+        "logQuery": LOG_QUERY,
+        "start": START_TIME,
+        "end": END_TIME,
+        "rows": ROWS
+    }
+
+    if region == 'ap-southeast-2':
+        lint_api_url = LINT_AU_API_URL
+        headers = DEFAULT_HEADERS
+        token = get_api_token(token=os.environ.get("VMC_AU_REFRESH_TOKEN", None))
+        headers.update({'csp-auth-token': token})
+    elif region == 'eu-central-1' or region == 'eu-west-2' or region == 'eu-west-1':
+        lint_api_url = LINT_EU_API_URL
+        headers = DEFAULT_HEADERS
+        token = get_api_token(token=os.environ.get("VMC_FRA_REFRESH_TOKEN", None))
+        headers.update({'csp-auth-token': token})
+    else:
+        lint_api_url = LINT_API_URL
+        headers = DEFAULT_HEADERS
+        token = get_api_token()
+        headers.update({'csp-auth-token': token})
+
+    # Start a query.
+    # resp = api_request(LINT_API_URL + LINT_LOG_QUERY_LINK, method='post', headers=headers, data=json.dumps(QUERY_DICT))
+    resp = api_request(lint_api_url + LINT_LOG_QUERY_LINK, method='post', headers=headers, data=json.dumps(QUERY_DICT))
+    result = json.loads(resp.text)
+    #print(result)
+    if result.get('failureMessage', 0):
+        raise AssertionError(result['failureMessage'])
+
+    # Get the query.
+    print("Sleeping for 30 seconds and start fetching log query results.")
+    time.sleep(30)
+    # result = get_lint_log_query_results(LINT_API_URL + result['documentSelfLink'], headers=headers)
+    result = get_lint_log_query_results(lint_api_url + result['documentSelfLink'], headers=headers, base_url=lint_api_url)
+    print(str(len(result)) + " items found")
+    for item in result:
+        print(item['text'])
+
+    # Delete the task
+    print("Delete LINT log query task.")
+    # res = api_request(LINT_API_URL + LINT_LOG_QUERY_LINK + '/' + resp.json()['id'], method='delete', headers=headers)
+    res = api_request(lint_api_url + LINT_LOG_QUERY_LINK + '/' + resp.json()['id'], method='delete', headers=headers)
+    if res.status_code != 200 and res.status_code != 500:
+        raise AssertionError
+  
+    return 0
+
 def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_console_logs=True, time_period=3, cloud_trail=False):
     instance_id = None
     hardware_failure = False
@@ -167,6 +269,7 @@ def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_c
     last_system_status_failure = None
     shadow_account_id = None
     period = 60
+    cloudtrail_events = []
     failure_data = {'instance_status_failure': instance_status_failure, 'system_status_failure': system_status_failure}
     failure_data['sddc_id'] = sddc_id
     failure_data['org_id'] = org_id
@@ -231,17 +334,20 @@ def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_c
     if instance_id:
         if not no_console_logs:
             try:
-                resp = ec2_client.get_console_output(InstanceId=instance_id)
+                resp = ec2_client.get_console_output(InstanceId=instance_id, Latest=True)
                 value = resp.get('Output', 'No Serial Logs available')
                 if 'Hardware Error' in value or 'hardware vendor' in value:
                     hardware_failure = True
                 home = os.path.expanduser("~")
                 filename = os.path.join(home, instance_id + '-console.txt')
-                with open(filename, 'w') as f:
+                with open(filename, 'wb') as f:
                     f.write(value.encode('utf-8'))
                 print("Saving console output to file: " + filename)
+                if value == 'No Serial Logs available':
+                    print("Console logs are empty")
             except ClientError as e:
-                print(e.message)
+                # print(e.message)
+                print("%s" % e.response['Error'])
                 pass
 
     if not instance_id:
@@ -257,7 +363,8 @@ def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_c
                 if not 'instance_state' in failure_data:
                     failure_data['instance_state'] = resp['Reservations'][0]['Instances'][0]['State']
         except ClientError as e:
-            print(e.message)
+            # print(e.message)
+            print("%s" % e.response['Error'])
             pass
 
     if instance_id:
@@ -270,7 +377,8 @@ def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_c
                 if 'Events' in resp['InstanceStatuses'][0]:
                     failure_data['scheduled_events'] = resp['InstanceStatuses'][0]['Events']
         except ClientError as e:
-            print(e.message)
+            # print(e.message)
+            print("%s" % e.response['Error'])
             pass
 
     if time_period > 24:
@@ -321,7 +429,12 @@ def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_c
                    MaxResults=100)
         # print("Reboot Events:", resp['Events'])
         for item in resp['Events']:
-            print(item)
+            print(item['CloudTrailEvent'])
+            ctevent = json.loads(item['CloudTrailEvent'])
+            if instance_id and instance_id ==  ctevent['requestParameters']['instancesSet']['items'][0]['instanceId']:
+                cloudtrail_events.append({'instanceId': ctevent['requestParameters']['instancesSet']['items'][0]['instanceId'], 'eventTime': ctevent['eventTime']})
+            if not instance_id:
+                cloudtrail_events.append({'instanceId': ctevent['requestParameters']['instancesSet']['items'][0]['instanceId'], 'eventTime': ctevent['eventTime']})
         
     
     failure_data['instance_status_failure'] = instance_status_failure
@@ -331,6 +444,8 @@ def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_c
     failure_data['last_instance_status_failure'] = last_instance_status_failure
     failure_data['last_system_status_failure'] = last_system_status_failure
     failure_data['hardware_error'] = hardware_failure
+    if len(cloudtrail_events) > 0:
+        failure_data['cloudtrail_events'] = cloudtrail_events
     return failure_data
 
 def print_data(data):
@@ -367,9 +482,16 @@ if __name__ == '__main__':
 
     # To collect log bundle
    
-
     if args.autoscaler_tasks:
         get_autoscaler_tasks(org_id, args.sddc_id, args.ip_address)
+        sys.exit(0)
+
+    if args.lint_query:
+        lint_query(args.sddc_id, region, args.time_period)
+        sys.exit(0)
+
+    if args.nic_reset_query:
+        lint_query(args.sddc_id, region, args.time_period, nic_reset=True)
         sys.exit(0)
 
     if args.log_bundle:
@@ -395,12 +517,22 @@ if __name__ == '__main__':
                 RECOMMENDATION['Recommendation'] = 'FALSE_ALERT'
                 RECOMMENDATION['Details'] = ('False alert on a newly launched instance')
             elif abs(ret['first_system_status_failure'] - ret['first_instance_status_failure']) < timedelta(minutes=10):
-                RECOMMENDATION['Recommendation'] = 'FILE_AWS_TICKET'
-                if 'system_status' in ret and ret['system_status'][0]['Status'] == 'passed':
-                    RECOMMENDATION['Details'] = ('System and instance failure happened within 10 minutes of each other. '
-                                                 'Check host state to verify if it got rebooted (Transient Issue)')
-                else:
-                    RECOMMENDATION['Details'] = ('Host went down due to an AWS failure (and is still down).')
+                if 'cloudtrail_events' in ret and len(ret['cloudtrail_events']) > 0:
+                    for item in ret['cloudtrail_events']:
+                        reboot_time = datetime.strptime(item['eventTime'],'%Y-%m-%dT%H:%M:%SZ')
+                        reboot_time = reboot_time.replace(tzinfo=timezone.utc)
+                        if item['instanceId'] == ret['instance_id'] and abs(reboot_time - ret['first_system_status_failure']) < timedelta(minutes=10):
+                            RECOMMENDATION['Recommendation'] = 'HOST_REBOOT'
+                            RECOMMENDATION['Details'] = ('System and instance failure happened within 10 minutes of each other. '
+                                                         'However it appears that the host was rebooted via AWS.')
+                            break
+                if not RECOMMENDATION['Recommendation']:
+                    RECOMMENDATION['Recommendation'] = 'FILE_AWS_TICKET'
+                    if 'system_status' in ret and ret['system_status'][0]['Status'] == 'passed':
+                        RECOMMENDATION['Details'] = ('System and instance failure happened within 10 minutes of each other. '
+                                                     'Check host state to verify if it got rebooted (Transient Issue)')
+                    else:
+                        RECOMMENDATION['Details'] = ('Host went down due to an AWS failure (and is still down).')
             elif ret['instance_status_failure']:
                 RECOMMENDATION['Recommendation'] = 'FILE_PR'
                 RECOMMENDATION['Details'] = 'Collect host and console logs and file a PR for investigation (Host PSOD)'

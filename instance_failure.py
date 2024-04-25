@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 import argparse
 import json
+import re
 from pprint import pprint
 from argparse import RawTextHelpFormatter
 import  boto3
@@ -43,10 +44,12 @@ parser.add_argument('-c', '--cloud-trail', action='store_true',
                     help='Query the cloudtrail for host reboot events')
 parser.add_argument('-q', '--lint-query', action='store_true',
                     help='Query the LINT logs for VM HA restart events')
+parser.add_argument('-u', '--uslint-query', action='store_true',
+                    help='Query the LINT logs for VM HA restart events')
 parser.add_argument('-r', '--nic-reset-query', action='store_true',
                     help='Query the LINT logs for NIC reset events')
 parser.add_argument('-l', '--log-bundle', help='Reference ID for collecting host log bundle')
-parser.add_argument('-p', '--time-period', type=int, choices=[1,3,6,12,24,36,48,72], default=3,
+parser.add_argument('-p', '--time-period', type=int, choices=[1,3,6,12,24,36,48,72,168], default=3,
                     help='Time range in hours to search for AWS cloudwatch metrics')
 parser.add_argument('-h', '--help', action='help')
 
@@ -68,7 +71,8 @@ def get_api_token(url=PROD_AUTH_URL, token=None):
     resp = api_request(url, method='post', headers={'Content-type': 'application/x-www-form-urlencoded'},
                        data={'refresh_token': token})
     if resp.status_code < 200 or resp.status_code > 202:
-        print("Unable to obtain access token from refresg token. Quitting")
+        print(resp.text)
+        print("Unable to obtain access token from refresh token. Quitting")
         return None
     return resp.json()['access_token']
 
@@ -87,9 +91,9 @@ def get_sddc_org_region(sddc_id):
 
 def get_autoscaler_tasks(org_id, sddc_id, ip_address):
     token = get_api_token()
-    # url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks'.format(org_id, sddc_id)
-    url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2021-12-01'.format(org_id, sddc_id)
-    # url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2022-07-01'.format(org_id, sddc_id)
+    #url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks'.format(org_id, sddc_id)
+    #url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2022-01-01'.format(org_id, sddc_id)
+    url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2023-06-01'.format(org_id, sddc_id)
     headers = DEFAULT_HEADERS
     headers.update({'csp-auth-token': token})
     resp = api_request(url, headers=headers)
@@ -200,7 +204,7 @@ def get_lint_log_query_results(url, headers, base_url):
     return result_list
 
 
-def lint_query(sddc_id, region, time_period=3, nic_reset=False):
+def lint_query(sddc_id, region, time_period=3, uslint_query=False, nic_reset=False):
     if nic_reset:
         LOG_QUERY = "SELECT log_timestamp, text FROM logs WHERE (text='vmnic0' AND text = 'reset' AND text != 'logical space' AND text != 'Function reset' AND sddc_id='{}') ORDER BY timestamp ASC".format(sddc_id)
     else:
@@ -216,7 +220,12 @@ def lint_query(sddc_id, region, time_period=3, nic_reset=False):
         "rows": ROWS
     }
 
-    if region == 'ap-southeast-2':
+    if uslint_query:
+        lint_api_url = LINT_API_URL
+        headers = DEFAULT_HEADERS
+        token = get_api_token()
+        headers.update({'csp-auth-token': token})
+    elif region == 'ap-southeast-2':
         lint_api_url = LINT_AU_API_URL
         headers = DEFAULT_HEADERS
         token = get_api_token(token=os.environ.get("VMC_AU_REFRESH_TOKEN", None))
@@ -343,8 +352,18 @@ def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_c
                 with open(filename, 'wb') as f:
                     f.write(value.encode('utf-8'))
                 print("Saving console output to file: " + filename)
-                if value == 'No Serial Logs available':
+                if value == 'No Serial Logs available' or len(value) == 0:
                     print("Console logs are empty")
+                else:
+                    r = re.compile("\d{4}-\d{2}-\d{1,2}T\d{2}:\d{2}\:\d{2}.\d{3}Z")
+                    matches = r.findall(value)
+                    #print(matches[-1])
+                    if matches:
+                        last_log = matches[-1]
+                        now = datetime.now()
+                        last_log_timestamp =  datetime.strptime(last_log, '%Y-%m-%dT%H:%M:%S.%fZ')
+                        if abs(now - last_log_timestamp) > timedelta(days=3):
+                            print("Console logs are old/stale")
             except ClientError as e:
                 # print(e.message)
                 print("%s" % e.response['Error'])
@@ -383,6 +402,8 @@ def get_instance_failure(sddc_id, org_id, region, vpc_id, ip_addr, inst_id, no_c
 
     if time_period > 24:
         period = 300
+    elif time_period > 72:
+        period = 3600
     cw_client = boto3.client('cloudwatch', aws_access_key_id=access_key,
                           aws_secret_access_key=secret_key, region_name=region,
                           aws_session_token=session_token)
@@ -487,11 +508,11 @@ if __name__ == '__main__':
         sys.exit(0)
 
     if args.lint_query:
-        lint_query(args.sddc_id, region, args.time_period)
+        lint_query(args.sddc_id, region, args.time_period, args.uslint_query)
         sys.exit(0)
 
     if args.nic_reset_query:
-        lint_query(args.sddc_id, region, args.time_period, nic_reset=True)
+        lint_query(args.sddc_id, region, args.time_period, args.uslint_query, nic_reset=True)
         sys.exit(0)
 
     if args.log_bundle:

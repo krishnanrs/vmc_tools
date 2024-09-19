@@ -93,7 +93,7 @@ def get_autoscaler_tasks(org_id, sddc_id, ip_address):
     token = get_api_token()
     #url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks'.format(org_id, sddc_id)
     #url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2022-01-01'.format(org_id, sddc_id)
-    url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2023-06-01'.format(org_id, sddc_id)
+    url = 'https://vmc.vmware.com/vmc/autoscaler/api/orgs/{}/sddcs/{}/get-tasks?from=2024-01-01'.format(org_id, sddc_id)
     headers = DEFAULT_HEADERS
     headers.update({'csp-auth-token': token})
     resp = api_request(url, headers=headers)
